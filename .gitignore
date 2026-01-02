@@ -1,0 +1,16 @@
+﻿# Office temporary files
+~$*.doc*
+~$*.ppt*
+*.tmp
+
+# LaTeX build files
+*.aux
+*.log
+*.out
+*.synctex.gz
+*.fls
+*.fdb_latexmk
+
+# System files
+Thumbs.db
+.DS_Store
