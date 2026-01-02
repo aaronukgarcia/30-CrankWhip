@@ -1,173 +1,156 @@
-The Elastic Engine (v6.0)
-An open research proposal for exploiting crankshaft torsional dynamics via Active Phase Alignment.
 
-Note: This project is currently in the Pre-Validation Proposal phase. We are actively seeking peer review, contributors for simulation modeling, and critical analysis of our control architecture.
+# Exploiting Crankshaft Whip
 
-📖 Table of Contents
-Executive Summary
+**Every crankshaft twists. We're going to use it.**
 
-The Physics
+---
 
-System Architecture
+> ⚠️ **Project Status: Pre-Validation Proposal (v6.0)**  
+> We're seeking peer review, simulation modellers, and people who enjoy proving ideas wrong. If that's you, see [Contributing](#contributing).
 
-Technology Stack
+---
 
-Development Roadmap
+## The Problem Nobody Talks About
 
-Safety & Compliance
+Internal combustion engines treat crankshafts as rigid. They're not. Under load, every crankshaft twists between 0.1° and 2.0°—storing energy like a wound spring. The industry's solution? Bolt on a heavy damper and burn that energy as heat.
 
-Contributing
+We think that's a waste.
 
-⚡ Executive Summary
-Contemporary Internal Combustion Engine (ICE) control treats the crankshaft as a rigid power transmission element. In reality, under high load, crankshafts exhibit torsional compliance between 0.1° and 2.0°. Current engineering suppresses this strain energy via heavy mass dampers, dissipating it as heat.
+## The Hypothesis
 
+What if you *timed* combustion to catch the crankshaft as it rebounds? Instead of fighting torsional dynamics, you'd surf them—recovering energy that's currently thrown away.
 
+**That's Active Phase Alignment.**
 
-The Elastic Engine hypothesis is that this strain energy can be recovered as useful shaft work by timing combustion events to apply torque in-phase with the elastic rebound velocity.
+| Metric | Target |
+|--------|--------|
+| BSFC improvement | 0.2–0.5% |
+| Continuous recovery | 50–200 W |
+| Peak recovery (resonance) | up to 2 kW |
+| Potential mass reduction | 1–3 kg (damper removal in Phase 2) |
 
+Small numbers. But at scale, across millions of engines and billions of kilometres, small numbers compound.
 
-Target Efficiency Gain: 0.2%–0.5% BSFC improvement.
+---
 
+## How It Works
 
-Power Recovery: 50–200 Watts continuous; up to 2 kW at resonance peaks.
+### The Physics in 30 Seconds
 
+1. **Strain phase** — Combustion torque twists the crank, storing elastic potential energy (*U = ½Kθ²*).
+2. **Rebound phase** — Cylinder pressure drops; the crank unwinds.
+3. **Recovery** — We fire the next cylinder *while the crank is still rebounding*, adding torque when angular velocity is already positive.
 
-Secondary Benefit: Potential removal of harmonic damper mass (1–3 kg) in Phase 2.
+The control law:
 
-🧪 The Physics
-Torque-Velocity Phase Alignment
-The core mechanism is Active Phase Alignment. Instead of fighting torsional vibration, we exploit it.
+```
+Δφ = G × (θ_measured − θ_predicted) × sign(ω_torsional)
+```
 
+Where *G* is gain-limited to **±3° crank angle**—hardware-enforced, tamper-sealed.
 
-Strain Phase: Combustion applies torque, twisting the crank and storing potential energy (U=½Kθ 
-2
- ).
+For net positive work, the integral must hold:
 
+```
+∫ τ(t) × ω_torsional(t) dt > 0
+```
 
-Rebound Phase: As pressure drops, the crank "unwinds".
+---
 
+## Architecture
 
-Recovery: We time the next combustion event to apply pressure while the crank is rebounding (ω 
-rebound
-​
- >0), maximizing instantaneous power transfer (P=τ×ω).
+We don't trust software alone with injection timing. The system runs a **dual-layer supervisor** model:
 
-Mathematical Formulation
-To achieve net positive work, we apply a timing offset Δϕ such that:
+### Layer 1: Deterministic ECU (Safety Net)
+- **Platform:** AUTOSAR Classic 4.4 / Infineon AURIX TC3xx
+- **Role:** Standard engine maps. Monitors Layer 2 heartbeat.
+- **Failure mode:** If Layer 2 dies, engine runs stock calibration indefinitely.
 
-∫[τ(t)×ω 
-torsional
-​
- (t)]dt>0
-The control law applied is: Δφ = G × (θ_measured − θ_predicted) × sign(ω_torsional)
+### Layer 2: FPGA Torsional Supervisor
+- **Platform:** Xilinx Zynq UltraScale+ (ZCU106)
+- **Role:** Real-time torsional state estimation + timing offset calculation
+- **Hard constraint:** End-to-end latency ≤128 µs
 
+| Stage | Latency |
+|-------|---------|
+| Sensor acquisition | 10 µs |
+| ADC conversion | 2 µs |
+| FPGA signal processing | 5 µs |
+| MPC solve | 8 µs |
+| Injector response | 80–100 µs |
+| **Total** | **~108–128 µs** |
 
-Where G is a gain factor bounded by authority limits (±3° CA). 
+> **Critical:** Injection timing triggers on hardware interrupts from the crank encoder—not CAN messages.
 
-🏗 System Architecture
-The system utilizes a Dual-Layer Supervisor topology to separate optimization from safety-critical operations.
+---
 
-Layer 1: The Deterministic ECU (Safety Net)
+## Technology Stack
 
-Platform: AUTOSAR Classic 4.4 on Infineon AURIX TC3xx.
+| Component | Selection |
+|-----------|-----------|
+| Compute | Xilinx Zynq UltraScale+ (ARM Cortex-A53 + FPGA) |
+| Primary sensor | MagCanica MTS-100HT |
+| Secondary sensor | Methode TS-200 |
+| State estimation | Extended Kalman Filter (EKF) |
+| Control | Linear-parameter-varying MPC, 4 states |
+| Fatigue monitoring | Rainflow counting (ASTM E1049-85) + Miner's Rule |
 
-Role: Standard engine control. Monitors Layer 2 heartbeat.
+---
 
+## Roadmap
 
-Fail-Safe: If Layer 2 fails, engine reverts to standard maps indefinitely.
+| Phase | Duration | Objective | Status |
+|-------|----------|-----------|--------|
+| **1: Subsystem Characterisation** | Months 0–14 | Validate sensor survival at 160°C; achieve >99% prediction confidence, <0.5% drift | 🟡 Active |
+| **2: Active Damping** | Months 14–24 | Demonstrate 50% torsional amplitude reduction without physical damper | 🔴 Pending |
+| **3: Efficiency Exploitation** | Months 24–36 | Demonstrate >0.2% BSFC improvement | 🔴 Pending |
 
-Layer 2: The FPGA Torsional Supervisor
+---
 
-Platform: Xilinx Zynq UltraScale+ (ZCU106).
+## Safety & Compliance
 
+| Concern | Mitigation |
+|---------|------------|
+| Timing authority | Analog comparator hard-clips offsets to ±3° CA. Physically tamper-sealed. |
+| ISO 26262 | Fatigue monitoring designed to ASIL-C |
+| EU AI Act (2024/1689) | Deterministic MPC—no neural networks. Currently out of scope. |
+| Liability | Per UCTA 1977, death/injury liability cannot be excluded. Research use only. |
 
-Role: High-speed torsional state estimation and injection timing offset calculation.
+---
 
-Latency: Hard real-time requirement. End-to-End latency budget is 108–128 µs.
+## Contributing
 
-Component	Latency (µs)
-Sensor Acquisition	10
-ADC Conversion	2
-FPGA Signal Processing	5
-Prediction Algorithm (MPC)	8
-Injector Response	80–100
-Total	~108–128
+We need people who break things.
 
+### Open Roles
 
-Note: Injection timing relies on hardware interrupts from the crankshaft encoder, NOT CAN bus messages. 
+- **Control theorists** — Audit the LPV model and EKF convergence (see Quartullo et al., 2023)
+- **FPGA engineers** — Squeeze the MPC solver under 8 µs on Zynq
+- **Simulation specialists** — Build independent Simulink models to stress-test efficiency ceiling claims
 
-💻 Technology Stack
+### How to Engage
 
-Hardware: Xilinx Zynq UltraScale+ (ARM Cortex-A53 + FPGA fabric).
+1. Check [Issues](./issues) for open RFC threads
+2. Fork the repo and submit PRs to `docs/` or `architecture/`
+3. Fatigue model changes **must** cite ASTM E1049-85 compliance
 
+---
 
-Sensors: MagCanica MTS-100HT (Primary), Methode TS-200 (Secondary).
+## License
 
+[TBD — MIT / Apache 2.0 / Proprietary]
 
-Algorithms:
+---
 
+<sub>Based on *The Elastic Engine v6.0: Feasibility Study & Control Architecture* — January 2026</sub>
 
-MPC: Linear-parameter-varying (LPV) model with 4 states.
+---
 
+**Key changes:**
+- Killed the emojis (they undermined credibility)
+- Led with the core insight, not the table of contents
+- Made the "why should I care" obvious in the first 10 seconds
+- Tightened tables, cut redundancy
+- Made contributing feel like an invitation to something interesting, not a chore
 
-State Estimation: Extended Kalman Filter (EKF) for transient convergence.
-
-
-Fatigue Monitoring: Rainflow cycle counting (ASTM E1049-85) + Miner's Rule.
-
-🛣 Development Roadmap
-We are currently initiating Phase 1.
-
-Phase 1: Subsystem Characterisation (Months 0–14) 🟡 Current Status
-
-Goal: Validate sensor thermal survival (160°C) and prediction algorithms.
-
-Gate Criteria: >99% prediction confidence, <0.5% sensor drift.
-
-Phase 2: Active Damping Validation (Months 14–24) 🔴
-
-Goal: Demonstrate 50% torsional amplitude reduction without physical damper.
-
-Phase 3: Efficiency Exploitation (Months 24–36) 🔴
-
-Goal: Demonstrate >0.2% BSFC improvement.
-
-🛡 Safety & Compliance
-This project adheres to strict safety protocols regarding "Start of Injection" authority.
-
-Hardware Limits: An analog comparator on the FPGA board physically clips timing offsets to ±3° CA. This is tamper-sealed.
-
-
-EU AI Act: The system uses deterministic Model Predictive Control (MPC), not neural networks. It is currently classified outside the scope of "AI Systems" under EU Regulation 2024/1689.
-
-
-
-ISO 26262: Fatigue monitoring is ASIL-C compliant.
-
-🤝 Contributing
-We are looking for contributors to help validating V6.0 of the proposal.
-
-Areas for Contribution
-
-Control Theory: Reviewing the LPV model structure and EKF convergence rates (referencing Quartullo et al., 2023).
-
-
-FPGA/RTL: Optimizing the solver implementation for the Zynq architecture to ensure <8 µs solve times.
-
-
-Simulation: Building independent MATLAB/Simulink models to Red Team the "Efficiency Ceiling" claims.
-
-How to Submit
-Check the Issues tab for open "Request for Comment" (RFC) threads.
-
-Fork the repo and propose changes to the docs/ architecture folders.
-
-All PRs regarding the fatigue model must cite ASTM E1049-85 compliance.
-
-Legal & Liability
-Licensing: [Insert License Here - e.g., MIT, Apache 2.0, or Proprietary].
-
-Liability: Per UCTA 1977, liability for death/personal injury cannot be excluded. All contributors must acknowledge that code provided here is for research purposes only and not for deployment on public roads without certification.
-
-
-Based on "The Elastic Engine V6.0: Feasibility Study & Control Architecture" - Jan 2026
+Want me to adjust the tone further—more academic, more startup-pitch, more engineering-dry?
